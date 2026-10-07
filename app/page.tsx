@@ -1,403 +1,306 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { v4 as uuidv4 } from 'uuid';
-import { format } from 'date-fns';
-import { Card, Button, EmptyState, ListRow } from '@/components/ui';
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 
-// External libraries for PDF export
-import html2canvas from 'html2canvas';
-import jsPDF from 'jspdf';
-
-// Shared record type from the brief
-type BaseRecord = { id: string; title: string; notes: string; createdAt: string };
-
-// Extended Invoice type for the product's specific needs
-type InvoiceStatus = "Draft" | "Payment Link Ready" | "Paid";
-
-interface InvoiceRecord extends BaseRecord {
-  clientName: string;
-  totalAmount: number;
-  status: InvoiceStatus;
-  paymentLink?: string;
-  shareLink?: string; // Generated on the fly, but useful to have a field
+interface InvoiceItem {
+  id: string;
+  description: string;
+  quantity: number;
+  unitPrice: number;
 }
 
-const LOCAL_STORAGE_KEY = "lastmile:invoice-generator-freelancers:invoices";
+interface Invoice {
+  id: string;
+  clientName: string;
+  clientEmail: string;
+  items: InvoiceItem[];
+  total: number;
+  status: 'Draft' | 'Payment Link Ready' | 'Paid';
+  createdAt: string;
+  updatedAt: string;
+  paymentLink?: string;
+}
 
-const loadInvoices = (): InvoiceRecord[] => {
-  if (typeof window === 'undefined') return [];
-  try {
-    const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
-    return stored ? JSON.parse(stored) : [];
-  } catch (error) {
-    console.error("Failed to load invoices from localStorage:", error);
-    return [];
-  }
-};
+const STORAGE_KEY = 'freelance_invoice_lite_data';
 
-const saveInvoices = (invoices: InvoiceRecord[]) => {
-  if (typeof window === 'undefined') return;
-  try {
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(invoices));
-  } catch (error) {
-    console.error("Failed to save invoices to localStorage:", error);
-  }
-};
+export default function Dashboard() {
+  const router = useRouter();
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [clientName, setClientName] = useState('');
+  const [clientEmail, setClientEmail] = useState('');
+  const [items, setItems] = useState<InvoiceItem[]>([
+    { id: crypto.randomUUID(), description: '', quantity: 1, unitPrice: 0 }
+  ]);
 
-const DashboardPage: React.FC = () => {
-  const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingInvoice, setEditingInvoice] = useState<InvoiceRecord | null>(null);
-
-  // Load invoices on initial render
   useEffect(() => {
-    let initialInvoices = loadInvoices();
-    if (initialInvoices.length === 0) {
-      // Pre-populate with sample data if empty
-      initialInvoices = [
-        {
-          id: uuidv4(),
-          title: "Web Development Project - Acme Corp",
-          notes: "Full-stack development for their new e-commerce platform. Includes frontend UI/UX and backend API integration.",
-          createdAt: new Date().toISOString(),
-          clientName: "Acme Corp",
-          totalAmount: 5500.00,
-          status: "Draft",
-        },
-        {
-          id: uuidv4(),
-          title: "Mobile App UI Design - Globex Inc.",
-          notes: "Designed user interface and user experience for their upcoming iOS and Android applications. Delivered high-fidelity mockups and prototypes.",
-          createdAt: new new Date(Date.now() - 86400000 * 2).toISOString(), // 2 days ago
-          clientName: "Globex Inc.",
-          totalAmount: 3200.00,
-          status: "Payment Link Ready",
-          paymentLink: "https://checkout.stripe.com/pay/cs_test_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6a7b8c9d0e1f2",
-        },
-        {
-          id: uuidv4(),
-          title: "Consulting Services - Initech",
-          notes: "Provided strategic consulting on cloud infrastructure migration and DevOps best practices. Conducted workshops and provided documentation.",
-          createdAt: new new Date(Date.now() - 86400000 * 7).toISOString(), // 7 days ago
-          clientName: "Initech",
-          totalAmount: 1800.00,
-          status: "Paid",
-        },
-      ];
-      saveInvoices(initialInvoices);
-    }
-    setInvoices(initialInvoices);
-  }, []);
-
-  // Save invoices whenever they change
-  useEffect(() => {
-    saveInvoices(invoices);
-  }, [invoices]);
-
-  // Handle Stripe payment success redirect
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const invoiceId = params.get('invoiceId');
-    const paymentSuccess = params.get('payment_success');
-
-    if (invoiceId && paymentSuccess === 'true') {
-      setInvoices(prevInvoices => {
-        const updatedInvoices = prevInvoices.map(inv =>
-          inv.id === invoiceId ? { ...inv, status: "Paid" } : inv
-        );
-        return updatedInvoices;
-      });
-      // Clean up URL to prevent re-triggering on refresh
-      const newUrl = new URL(window.location.href);
-      newUrl.searchParams.delete('invoiceId');
-      newUrl.searchParams.delete('payment_success');
-      window.history.replaceState({}, document.title, newUrl.pathname + newUrl.search);
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      try {
+        setInvoices(JSON.parse(stored));
+      } catch (e) {
+        console.error('Failed to parse invoices', e);
+      }
     }
   }, []);
 
-  const handleCreateOrUpdateInvoice = (invoiceData: Omit<InvoiceRecord, 'id' | 'createdAt' | 'status'>) => {
-    if (editingInvoice) {
-      setInvoices(prevInvoices =>
-        prevInvoices.map(inv =>
-          inv.id === editingInvoice.id
-            ? { ...inv, ...invoiceData, totalAmount: Number(invoiceData.totalAmount) } // Ensure totalAmount is number
-            : inv
-        )
-      );
-      setEditingInvoice(null);
-    } else {
-      const newInvoice: InvoiceRecord = {
-        id: uuidv4(),
-        createdAt: new Date().toISOString(),
-        status: "Draft",
-        ...invoiceData,
-        totalAmount: Number(invoiceData.totalAmount), // Ensure totalAmount is number
-      };
-      setInvoices(prevInvoices => [newInvoice, ...prevInvoices]);
-    }
-    setIsModalOpen(false);
+  const persistInvoices = (newInvoices: Invoice[]) => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(newInvoices));
+    setInvoices(newInvoices);
   };
 
-  const handleDeleteInvoice = (id: string) => {
-    if (window.confirm("Are you sure you want to delete this invoice?")) {
-      setInvoices(prevInvoices => prevInvoices.filter(inv => inv.id !== id));
-    }
+  const handleCreate = () => {
+    if (!clientName.trim()) return alert('Client name is required');
+    
+    const total = items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+    const newInvoice: Invoice = {
+      id: crypto.randomUUID(),
+      clientName,
+      clientEmail,
+      items,
+      total,
+      status: 'Draft',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    persistInvoices([newInvoice, ...invoices]);
+    setClientName('');
+    setClientEmail('');
+    setItems([{ id: crypto.randomUUID(), description: '', quantity: 1, unitPrice: 0 }]);
   };
 
-  const handleCopyLink = async (invoiceId: string) => {
-    const shareUrl = `${window.location.origin}/invoice?id=${invoiceId}`;
-    try {
-      await navigator.clipboard.writeText(shareUrl);
-      alert("Invoice link copied to clipboard!");
-    } catch (err) {
-      console.error("Failed to copy: ", err);
-      alert("Failed to copy link. Please try again.");
+  const handleDelete = (id: string) => {
+    if (confirm('Are you sure you want to delete this invoice?')) {
+      persistInvoices(invoices.filter(inv => inv.id !== id));
     }
   };
 
-  const handleSendEmail = (invoice: InvoiceRecord) => {
-    const shareUrl = `${window.location.origin}/invoice?id=${invoice.id}`;
-    const subject = `Invoice from ${invoice.clientName} - #${invoice.id.substring(0, 8)}`;
-    const body = `Dear ${invoice.clientName},
-
-Please find your invoice for ${invoice.title} attached/linked below.
-
-Invoice Amount: $${invoice.totalAmount.toFixed(2)}
-View Invoice: ${shareUrl}
-
-Thank you for your business!
-
-Best regards,
-Your Name/Company`;
-
-    window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  const handleCopyLink = (id: string) => {
+    const url = `${window.location.origin}/share/${id}`;
+    navigator.clipboard.writeText(url);
+    alert('Share link copied to clipboard!');
   };
 
-  const handleGeneratePaymentLink = (invoiceId: string) => {
-    setInvoices(prevInvoices =>
-      prevInvoices.map(inv =>
-        inv.id === invoiceId && inv.status === "Draft"
-          ? {
-              ...inv,
-              status: "Payment Link Ready",
-              paymentLink: `https://checkout.stripe.com/pay/cs_test_1234567890abcdefghijklmnopqrstuvwxyz?invoiceId=${invoiceId}`,
-            }
-          : inv
-      )
+  const handleEmail = (inv: Invoice) => {
+    const subject = encodeURIComponent(`Invoice ${inv.id.slice(0, 8)} from Freelancer`);
+    const body = encodeURIComponent(
+      `Hi ${inv.clientName},\n\nPlease find your invoice details below.\n\nView Invoice: ${window.location.origin}/share/${inv.id}\n\nThank you!`
     );
-    alert("Payment link generated! (Simulated Stripe Checkout URL)");
+    window.location.href = `mailto:${inv.clientEmail}?subject=${subject}&body=${body}`;
   };
 
-  const handleCopyPaymentLink = async (paymentLink: string) => {
-    try {
-      await navigator.clipboard.writeText(paymentLink);
-      alert("Payment link copied to clipboard!");
-    } catch (err) {
-      console.error("Failed to copy payment link: ", err);
-      alert("Failed to copy payment link. Please try again.");
-    }
+  const handleGeneratePayment = (inv: Invoice) => {
+    // Simulate Stripe Checkout session creation
+    const mockPaymentLink = `https://checkout.stripe.com/pay/cs_test_${inv.id}`;
+    const updatedInvoice = {
+      ...inv,
+      status: 'Payment Link Ready',
+      paymentLink: mockPaymentLink,
+      updatedAt: new Date().toISOString(),
+    };
+    persistInvoices(invoices.map(i => i.id === inv.id ? updatedInvoice : i));
   };
 
-  const handleExportPdf = useCallback(async (invoice: InvoiceRecord) => {
-    try {
-      // Create a temporary div to render the invoice content for PDF
-      const printContent = document.createElement('div');
-      printContent.style.padding = '20px';
-      printContent.style.fontFamily = 'Inter, sans-serif';
-      printContent.style.color = '#e6e9ef';
-      printContent.style.backgroundColor = '#14171c';
-      printContent.style.width = '800px'; // A reasonable width for PDF
-
-      printContent.innerHTML = `
-        <h1 style="font-size: 24px; margin-bottom: 20px; color: #4f8cff;">Invoice #${invoice.id.substring(0, 8)}</h1>
-        <p style="margin-bottom: 10px;"><strong>Client:</strong> ${invoice.clientName}</p>
-        <p style="margin-bottom: 10px;"><strong>Title:</strong> ${invoice.title}</p>
-        <p style="margin-bottom: 10px;"><strong>Notes:</strong> ${invoice.notes}</p>
-        <p style="margin-bottom: 10px;"><strong>Created:</strong> ${format(new Date(invoice.createdAt), 'MMM dd, yyyy')}</p>
-        <p style="margin-bottom: 10px;"><strong>Status:</strong> <span style="color: ${invoice.status === 'Paid' ? '#28a745' : invoice.status === 'Payment Link Ready' ? '#ffc107' : '#6c757d'}; font-weight: bold;">${invoice.status}</span></p>
-        <h2 style="font-size: 20px; margin-top: 30px; margin-bottom: 15px;">Total Amount: <span style="font-family: 'JetBrains Mono', monospace; color: #4f8cff;">$${invoice.totalAmount.toFixed(2)}</span></h2>
-      `;
-
-      document.body.appendChild(printContent);
-
-      const canvas = await html2canvas(printContent, {
-        scale: 2, // Increase scale for better resolution
-        useCORS: true,
-        backgroundColor: '#14171c', // Match surface color
-      });
-
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'px',
-        format: [canvas.width, canvas.height], // Use canvas dimensions for PDF
-      });
-
-      pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
-      pdf.save(`invoice-${invoice.clientName.replace(/\s/g, '-')}-${invoice.id.substring(0, 8)}.pdf`);
-
-      document.body.removeChild(printContent);
-      alert("Invoice PDF exported successfully!");
-    } catch (error) {
-      console.error("Error generating PDF:", error);
-      alert("Failed to generate PDF. Please try again or check console for details. This feature might not work on older mobile browsers.");
-    }
-  }, []);
-
-  const openCreateModal = () => {
-    setEditingInvoice(null);
-    setIsModalOpen(true);
+  const addItem = () => {
+    setItems([...items, { id: crypto.randomUUID(), description: '', quantity: 1, unitPrice: 0 }]);
   };
 
-  const openEditModal = (invoice: InvoiceRecord) => {
-    setEditingInvoice(invoice);
-    setIsModalOpen(true);
+  const updateItem = (index: number, field: keyof InvoiceItem, value: string | number) => {
+    const newItems = [...items];
+    newItems[index] = { ...newItems[index], [field]: value };
+    setItems(newItems);
+  };
+
+  const removeItem = (index: number) => {
+    setItems(items.filter((_, i) => i !== index));
   };
 
   return (
-    <div className="min-h-screen bg-[#0b0d10] text-[#e6e9ef] font-inter p-8">
-      <div className="max-w-4xl mx-auto">
-        <h1 className="text-3xl font-bold mb-6 text-[#e6e9ef]">Dashboard</h1>
+    <div className="min-h-screen bg-[#0b0d10] text-[#e6e9ef] font-sans p-4 md:p-8">
+      <header className="max-w-6xl mx-auto mb-8 flex justify-between items-center border-b border-gray-800 pb-4">
+        <h1 className="text-2xl font-bold tracking-tight">Freelance Invoice Lite</h1>
+        <div className="text-xs text-gray-500 font-mono">v1.0.0 &bull; Local Storage</div>
+      </header>
 
-        <div className="flex justify-end mb-6">
-          <Button onClick={openCreateModal} className="bg-[#4f8cff] hover:bg-[#3a7ae0] text-white">
-            + Create New Invoice
-          </Button>
-        </div>
+      <main className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
+        {/* Create Invoice Form */}
+        <section className="lg:col-span-1 bg-[#14171c] p-6 rounded-lg border border-gray-800 h-fit">
+          <h2 className="text-lg font-semibold mb-4 text-[#4f8cff]">New Invoice</h2>
+          
+          <div className="space-y-4 mb-6">
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Client Name</label>
+              <input
+                type="text"
+                value={clientName}
+                onChange={(e) => setClientName(e.target.value)}
+                placeholder="Enter client name"
+                className="w-full bg-[#0b0d10] border border-gray-700 rounded p-2 text-sm focus:border-[#4f8cff] outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Client Email</label>
+              <input
+                type="email"
+                value={clientEmail}
+                onChange={(e) => setClientEmail(e.target.value)}
+                placeholder="client@example.com"
+                className="w-full bg-[#0b0d10] border border-gray-700 rounded p-2 text-sm focus:border-[#4f8cff] outline-none"
+              />
+            </div>
+          </div>
 
-        {invoices.length === 0 ? (
-          <EmptyState
-            title="No Invoices Yet"
-            description="Start by creating your first freelance invoice."
-            action={<Button onClick={openCreateModal} className="bg-[#4f8cff] hover:bg-[#3a7ae0] text-white">Create Invoice</Button>}
-          />
-        ) : (
-          <Card className="p-0 bg-[#14171c] border border-[#2a2e35]">
-            <ul className="divide-y divide-[#2a2e35]">
-              {invoices.map(invoice => (
-                <ListRow
-                  key={invoice.id}
-                  id={invoice.id}
-                  title={
-                    <div className="flex items-center justify-between w-full">
-                      <span className="font-medium text-lg text-[#e6e9ef]">{invoice.clientName} - {invoice.title}</span>
-                      <span className={`px-3 py-1 rounded-full text-xs font-semibold ${invoice.status === 'Paid' ? 'bg-green-600 text-white' : invoice.status === 'Payment Link Ready' ? 'bg-yellow-600 text-white' : 'bg-gray-600 text-white'}`}>
-                        {invoice.status}
-                      </span>
-                    </div>
-                  }
-                  notes={
-                    <div className="text-sm text-[#aeb3bb] mt-1">
-                      <p className="truncate max-w-full">{invoice.notes}</p>
-                      <p className="mt-1 text-xs text-[#8a8f98] font-jetbrains-mono">Created: {format(new Date(invoice.createdAt), 'MMM dd, yyyy')}</p>
-                      <p className="mt-1 text-lg font-bold text-[#4f8cff] font-jetbrains-mono">Total: ${invoice.totalAmount.toFixed(2)}</p>
-                    </div>
-                  }
-                  actions={
-                    <div className="flex flex-wrap gap-2 mt-2 md:mt-0">
-                      <Button onClick={() => openEditModal(invoice)} className="bg-[#2a2e35] hover:bg-[#3a404a] text-[#e6e9ef] text-xs px-3 py-1">Edit</Button>
-                      <Button onClick={() => handleCopyLink(invoice.id)} className="bg-[#2a2e35] hover:bg-[#3a404a] text-[#e6e9ef] text-xs px-3 py-1">Copy Link</Button>
-                      <Button onClick={() => handleSendEmail(invoice)} className="bg-[#2a2e35] hover:bg-[#3a404a] text-[#e6e9ef] text-xs px-3 py-1">Email</Button>
-                      {invoice.status === "Draft" && (
-                        <Button onClick={() => handleGeneratePaymentLink(invoice.id)} className="bg-[#4f8cff] hover:bg-[#3a7ae0] text-white text-xs px-3 py-1">Generate Payment</Button>
-                      )}
-                      {invoice.status === "Payment Link Ready" && invoice.paymentLink && (
-                        <Button onClick={() => handleCopyPaymentLink(invoice.paymentLink!)} className="bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-1">Copy Payment Link</Button>
-                      )}
-                      <Button onClick={() => handleExportPdf(invoice)} className="bg-[#2a2e35] hover:bg-[#3a404a] text-[#e6e9ef] text-xs px-3 py-1">Export PDF</Button>
-                      <Button onClick={() => handleDeleteInvoice(invoice.id)} className="bg-red-600 hover:bg-red-700 text-white text-xs px-3 py-1">Delete</Button>
-                    </div>
-                  }
-                />
-              ))}
-            </ul>
-          </Card>
-        )}
-
-        {isModalOpen && (
-          <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
-            <Card className="bg-[#14171c] p-6 w-full max-w-md border border-[#2a2e35]">
-              <h2 className="text-2xl font-bold mb-4 text-[#e6e9ef]">{editingInvoice ? 'Edit Invoice' : 'Create New Invoice'}</h2>
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const formData = new FormData(e.currentTarget);
-                  handleCreateOrUpdateInvoice({
-                    clientName: formData.get('clientName') as string,
-                    title: formData.get('title') as string,
-                    notes: formData.get('notes') as string,
-                    totalAmount: parseFloat(formData.get('totalAmount') as string),
-                  });
-                }}
-                className="space-y-4"
-              >
-                <div>
-                  <label htmlFor="clientName" className="block text-sm font-medium text-[#e6e9ef] mb-1">Client Name</label>
+          <div className="mb-6">
+            <label className="block text-xs text-gray-400 mb-2">Line Items</label>
+            <div className="space-y-2">
+              {items.map((item, index) => (
+                <div key={item.id} className="flex gap-2 items-start">
                   <input
                     type="text"
-                    id="clientName"
-                    name="clientName"
-                    defaultValue={editingInvoice?.clientName || ''}
-                    required
-                    className="w-full p-2 bg-[#0b0d10] border border-[#2a2e35] rounded-md text-[#e6e9ef] focus:ring-[#4f8cff] focus:border-[#4f8cff]"
+                    value={item.description}
+                    onChange={(e) => updateItem(index, 'description', e.target.value)}
+                    placeholder="Description"
+                    className="flex-grow bg-[#0b0d10] border border-gray-700 rounded p-2 text-sm focus:border-[#4f8cff] outline-none"
                   />
-                </div>
-                <div>
-                  <label htmlFor="title" className="block text-sm font-medium text-[#e6e9ef] mb-1">Invoice Title</label>
-                  <input
-                    type="text"
-                    id="title"
-                    name="title"
-                    defaultValue={editingInvoice?.title || ''}
-                    required
-                    className="w-full p-2 bg-[#0b0d10] border border-[#2a2e35] rounded-md text-[#e6e9ef] focus:ring-[#4f8cff] focus:border-[#4f8cff]"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="notes" className="block text-sm font-medium text-[#e6e9ef] mb-1">Notes</label>
-                  <textarea
-                    id="notes"
-                    name="notes"
-                    defaultValue={editingInvoice?.notes || ''}
-                    rows={4}
-                    className="w-full p-2 bg-[#0b0d10] border border-[#2a2e35] rounded-md text-[#e6e9ef] focus:ring-[#4f8cff] focus:border-[#4f8cff]"
-                  ></textarea>
-                </div>
-                <div>
-                  <label htmlFor="totalAmount" className="block text-sm font-medium text-[#e6e9ef] mb-1">Total Amount ($)</label>
                   <input
                     type="number"
-                    id="totalAmount"
-                    name="totalAmount"
-                    defaultValue={editingInvoice?.totalAmount || ''}
-                    step="0.01"
-                    required
-                    className="w-full p-2 bg-[#0b0d10] border border-[#2a2e35] rounded-md text-[#e6e9ef] font-jetbrains-mono focus:ring-[#4f8cff] focus:border-[#4f8cff]"
+                    value={item.quantity}
+                    onChange={(e) => updateItem(index, 'quantity', Number(e.target.value))}
+                    placeholder="Qty"
+                    className="w-16 bg-[#0b0d10] border border-gray-700 rounded p-2 text-sm focus:border-[#4f8cff] outline-none"
                   />
+                  <input
+                    type="number"
+                    value={item.unitPrice}
+                    onChange={(e) => updateItem(index, 'unitPrice', Number(e.target.value))}
+                    placeholder="Price"
+                    className="w-20 bg-[#0b0d10] border border-gray-700 rounded p-2 text-sm focus:border-[#4f8cff] outline-none"
+                  />
+                  {items.length > 1 && (
+                    <button
+                      onClick={() => removeItem(index)}
+                      className="text-red-500 hover:text-red-400 p-1"
+                    >
+                      ×
+                    </button>
+                  )}
                 </div>
-                <div className="flex justify-end space-x-2 mt-6">
-                  <Button
-                    type="button"
-                    onClick={() => setIsModalOpen(false)}
-                    className="bg-[#2a2e35] hover:bg-[#3a404a] text-[#e6e9ef]"
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    className="bg-[#4f8cff] hover:bg-[#3a7ae0] text-white"
-                  >
-                    {editingInvoice ? 'Update Invoice' : 'Save Invoice'}
-                  </Button>
-                </div>
-              </form>
-            </Card>
+              ))}
+            </div>
+            <button
+              onClick={addItem}
+              className="mt-2 text-xs text-[#4f8cff] hover:underline"
+            >
+              + Add Item
+            </button>
           </div>
-        )}
-      </div>
+
+          <div className="flex justify-end">
+            <button
+              onClick={handleCreate}
+              className="bg-[#4f8cff] text-black font-bold py-2 px-6 rounded hover:bg-blue-400 transition-colors text-sm"
+            >
+              Save Invoice
+            </button>
+          </div>
+        </section>
+
+        {/* Invoice List */}
+        <section className="lg:col-span-2">
+          <h2 className="text-xl font-bold mb-4">Recent Invoices</h2>
+          
+          {invoices.length === 0 ? (
+            <div className="text-center py-12 text-gray-500 bg-[#14171c] rounded-lg border border-gray-800">
+              No invoices created yet. Start by filling out the form.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {invoices.map((inv) => (
+                <div
+                  key={inv.id}
+                  className="bg-[#14171c] p-4 rounded-lg border border-gray-800 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hover:border-gray-700 transition-colors"
+                >
+                  <div className="flex-grow min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Link
+                        href={`/invoice/${inv.id}`}
+                        className="font-mono text-[#4f8cff] hover:underline truncate max-w-[150px]"
+                      >
+                        {inv.id.slice(0, 8)}...
+                      </Link>
+                      <span
+                        className={`text-xs px-2 py-0.5 rounded font-medium ${
+                          inv.status === 'Paid'
+                            ? 'bg-green-900/50 text-green-400 border border-green-800'
+                            : inv.status === 'Payment Link Ready'
+                            ? 'bg-yellow-900/50 text-yellow-400 border border-yellow-800'
+                            : 'bg-gray-800 text-gray-400 border border-gray-700'
+                        }`}
+                      >
+                        {inv.status}
+                      </span>
+                    </div>
+                    <div className="text-sm text-gray-300 truncate">
+                      {inv.clientName} {inv.clientEmail && <span className="text-gray-500">&bull; {inv.clientEmail}</span>}
+                    </div>
+                    <div className="font-mono text-lg mt-1 text-[#e6e9ef]">
+                      ${inv.total.toFixed(2)}
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 flex-wrap">
+                    <Link
+                      href={`/invoice/${inv.id}`}
+                      className="px-3 py-1.5 bg-gray-800 rounded text-xs hover:bg-gray-700 transition-colors"
+                    >
+                      Edit
+                    </Link>
+                    <button
+                      onClick={() => handleCopyLink(inv.id)}
+                      className="px-3 py-1.5 bg-gray-800 rounded text-xs hover:bg-gray-700 transition-colors"
+                    >
+                      Copy Link
+                    </button>
+                    <button
+                      onClick={() => handleEmail(inv)}
+                      className="px-3 py-1.5 bg-gray-800 rounded text-xs hover:bg-gray-700 transition-colors"
+                    >
+                      Email
+                    </button>
+                    {inv.status === 'Draft' && (
+                      <button
+                        onClick={() => handleGeneratePayment(inv)}
+                        className="px-3 py-1.5 bg-[#4f8cff] text-black rounded text-xs font-bold hover:bg-blue-400 transition-colors"
+                      >
+                        Pay Link
+                      </button>
+                    )}
+                    {inv.paymentLink && inv.status === 'Payment Link Ready' && (
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(inv.paymentLink!);
+                          alert('Payment link copied!');
+                        }}
+                        className="px-3 py-1.5 bg-[#4f8cff] text-black rounded text-xs font-bold hover:bg-blue-400 transition-colors"
+                      >
+                        Copy Pay Link
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleDelete(inv.id)}
+                      className="px-3 py-1.5 bg-red-900/30 text-red-400 rounded text-xs hover:bg-red-900/50 transition-colors"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      </main>
     </div>
   );
-};
-
-export default DashboardPage;
+}
