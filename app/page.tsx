@@ -1,14 +1,13 @@
-"use client";
+'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 
 interface InvoiceItem {
   id: string;
   description: string;
   quantity: number;
-  unitPrice: number;
+  rate: number;
 }
 
 interface Invoice {
@@ -30,9 +29,6 @@ export default function Dashboard() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [clientName, setClientName] = useState('');
   const [clientEmail, setClientEmail] = useState('');
-  const [items, setItems] = useState<InvoiceItem[]>([
-    { id: crypto.randomUUID(), description: '', quantity: 1, unitPrice: 0 }
-  ]);
 
   useEffect(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
@@ -45,262 +41,118 @@ export default function Dashboard() {
     }
   }, []);
 
-  const persistInvoices = (newInvoices: Invoice[]) => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(newInvoices));
-    setInvoices(newInvoices);
+  const saveToStorage = (data: Invoice[]) => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    setInvoices(data);
   };
 
   const handleCreate = () => {
-    if (!clientName.trim()) return alert('Client name is required');
-    
-    const total = items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+    if (!clientName.trim()) return;
     const newInvoice: Invoice = {
       id: crypto.randomUUID(),
       clientName,
       clientEmail,
-      items,
-      total,
+      items: [],
+      total: 0,
       status: 'Draft',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-
-    persistInvoices([newInvoice, ...invoices]);
+    const updated = [newInvoice, ...invoices];
+    saveToStorage(updated);
     setClientName('');
     setClientEmail('');
-    setItems([{ id: crypto.randomUUID(), description: '', quantity: 1, unitPrice: 0 }]);
   };
 
   const handleDelete = (id: string) => {
     if (confirm('Are you sure you want to delete this invoice?')) {
-      persistInvoices(invoices.filter(inv => inv.id !== id));
+      const updated = invoices.filter((inv) => inv.id !== id);
+      saveToStorage(updated);
     }
   };
 
-  const handleCopyLink = (id: string) => {
-    const url = `${window.location.origin}/share/${id}`;
-    navigator.clipboard.writeText(url);
+  const copyLink = (id: string) => {
+    navigator.clipboard.writeText(`${window.location.origin}/share/${id}`);
     alert('Share link copied to clipboard!');
   };
 
-  const handleEmail = (inv: Invoice) => {
-    const subject = encodeURIComponent(`Invoice ${inv.id.slice(0, 8)} from Freelancer`);
-    const body = encodeURIComponent(
-      `Hi ${inv.clientName},\n\nPlease find your invoice details below.\n\nView Invoice: ${window.location.origin}/share/${inv.id}\n\nThank you!`
-    );
-    window.location.href = `mailto:${inv.clientEmail}?subject=${subject}&body=${body}`;
-  };
-
-  const handleGeneratePayment = (inv: Invoice) => {
-    // Simulate Stripe Checkout session creation
-    const mockPaymentLink = `https://checkout.stripe.com/pay/cs_test_${inv.id}`;
-    const updatedInvoice = {
-      ...inv,
-      status: 'Payment Link Ready',
-      paymentLink: mockPaymentLink,
-      updatedAt: new Date().toISOString(),
-    };
-    persistInvoices(invoices.map(i => i.id === inv.id ? updatedInvoice : i));
-  };
-
-  const addItem = () => {
-    setItems([...items, { id: crypto.randomUUID(), description: '', quantity: 1, unitPrice: 0 }]);
-  };
-
-  const updateItem = (index: number, field: keyof InvoiceItem, value: string | number) => {
-    const newItems = [...items];
-    newItems[index] = { ...newItems[index], [field]: value };
-    setItems(newItems);
-  };
-
-  const removeItem = (index: number) => {
-    setItems(items.filter((_, i) => i !== index));
+  const sendEmail = (id: string) => {
+    const shareUrl = `${window.location.origin}/share/${id}`;
+    const subject = encodeURIComponent(`Invoice ${id.slice(0, 8)} from Freelance Invoice Lite`);
+    const body = encodeURIComponent(`Please find your invoice attached.\nView it here: ${shareUrl}`);
+    window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
   };
 
   return (
-    <div className="min-h-screen bg-[#0b0d10] text-[#e6e9ef] font-sans p-4 md:p-8">
-      <header className="max-w-6xl mx-auto mb-8 flex justify-between items-center border-b border-gray-800 pb-4">
-        <h1 className="text-2xl font-bold tracking-tight">Freelance Invoice Lite</h1>
-        <div className="text-xs text-gray-500 font-mono">v1.0.0 &bull; Local Storage</div>
+    <div className="min-h-screen bg-[#0b0d10] text-[#e6e9ef] p-4 md:p-8 font-sans">
+      <header className="mb-8 border-b border-gray-800 pb-4">
+        <h1 className="text-2xl font-bold tracking-tight text-[#e6e9ef]">Freelance Invoice Lite</h1>
+        <p className="text-sm text-gray-500 mt-1">Mobile-first client-side invoicing</p>
       </header>
 
-      <main className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Create Invoice Form */}
-        <section className="lg:col-span-1 bg-[#14171c] p-6 rounded-lg border border-gray-800 h-fit">
-          <h2 className="text-lg font-semibold mb-4 text-[#4f8cff]">New Invoice</h2>
-          
-          <div className="space-y-4 mb-6">
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Client Name</label>
-              <input
-                type="text"
-                value={clientName}
-                onChange={(e) => setClientName(e.target.value)}
-                placeholder="Enter client name"
-                className="w-full bg-[#0b0d10] border border-gray-700 rounded p-2 text-sm focus:border-[#4f8cff] outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Client Email</label>
-              <input
-                type="email"
-                value={clientEmail}
-                onChange={(e) => setClientEmail(e.target.value)}
-                placeholder="client@example.com"
-                className="w-full bg-[#0b0d10] border border-gray-700 rounded p-2 text-sm focus:border-[#4f8cff] outline-none"
-              />
-            </div>
-          </div>
+      <section className="mb-8 bg-[#14171c] p-4 rounded-lg border border-gray-800">
+        <h2 className="text-lg font-semibold mb-4 text-[#4f8cff]">New Invoice</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <input
+            type="text"
+            placeholder="Client Name"
+            value={clientName}
+            onChange={(e) => setClientName(e.target.value)}
+            className="bg-[#0b0d10] border border-gray-700 rounded px-3 py-2 text-sm focus:border-[#4f8cff] outline-none"
+          />
+          <input
+            type="email"
+            placeholder="Client Email"
+            value={clientEmail}
+            onChange={(e) => setClientEmail(e.target.value)}
+            className="bg-[#0b0d10] border border-gray-700 rounded px-3 py-2 text-sm focus:border-[#4f8cff] outline-none"
+          />
+          <button
+            onClick={handleCreate}
+            disabled={!clientName.trim()}
+            className="bg-[#4f8cff] hover:bg-[#3a7bd5] disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium py-2 px-4 rounded transition-colors"
+          >
+            Create Invoice
+          </button>
+        </div>
+      </section>
 
-          <div className="mb-6">
-            <label className="block text-xs text-gray-400 mb-2">Line Items</label>
-            <div className="space-y-2">
-              {items.map((item, index) => (
-                <div key={item.id} className="flex gap-2 items-start">
-                  <input
-                    type="text"
-                    value={item.description}
-                    onChange={(e) => updateItem(index, 'description', e.target.value)}
-                    placeholder="Description"
-                    className="flex-grow bg-[#0b0d10] border border-gray-700 rounded p-2 text-sm focus:border-[#4f8cff] outline-none"
-                  />
-                  <input
-                    type="number"
-                    value={item.quantity}
-                    onChange={(e) => updateItem(index, 'quantity', Number(e.target.value))}
-                    placeholder="Qty"
-                    className="w-16 bg-[#0b0d10] border border-gray-700 rounded p-2 text-sm focus:border-[#4f8cff] outline-none"
-                  />
-                  <input
-                    type="number"
-                    value={item.unitPrice}
-                    onChange={(e) => updateItem(index, 'unitPrice', Number(e.target.value))}
-                    placeholder="Price"
-                    className="w-20 bg-[#0b0d10] border border-gray-700 rounded p-2 text-sm focus:border-[#4f8cff] outline-none"
-                  />
-                  {items.length > 1 && (
-                    <button
-                      onClick={() => removeItem(index)}
-                      className="text-red-500 hover:text-red-400 p-1"
-                    >
-                      ×
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-            <button
-              onClick={addItem}
-              className="mt-2 text-xs text-[#4f8cff] hover:underline"
-            >
-              + Add Item
-            </button>
-          </div>
-
-          <div className="flex justify-end">
-            <button
-              onClick={handleCreate}
-              className="bg-[#4f8cff] text-black font-bold py-2 px-6 rounded hover:bg-blue-400 transition-colors text-sm"
-            >
-              Save Invoice
-            </button>
-          </div>
-        </section>
-
-        {/* Invoice List */}
-        <section className="lg:col-span-2">
-          <h2 className="text-xl font-bold mb-4">Recent Invoices</h2>
-          
-          {invoices.length === 0 ? (
-            <div className="text-center py-12 text-gray-500 bg-[#14171c] rounded-lg border border-gray-800">
-              No invoices created yet. Start by filling out the form.
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {invoices.map((inv) => (
-                <div
-                  key={inv.id}
-                  className="bg-[#14171c] p-4 rounded-lg border border-gray-800 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hover:border-gray-700 transition-colors"
-                >
-                  <div className="flex-grow min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Link
-                        href={`/invoice/${inv.id}`}
-                        className="font-mono text-[#4f8cff] hover:underline truncate max-w-[150px]"
-                      >
-                        {inv.id.slice(0, 8)}...
-                      </Link>
-                      <span
-                        className={`text-xs px-2 py-0.5 rounded font-medium ${
-                          inv.status === 'Paid'
-                            ? 'bg-green-900/50 text-green-400 border border-green-800'
-                            : inv.status === 'Payment Link Ready'
-                            ? 'bg-yellow-900/50 text-yellow-400 border border-yellow-800'
-                            : 'bg-gray-800 text-gray-400 border border-gray-700'
-                        }`}
-                      >
-                        {inv.status}
-                      </span>
-                    </div>
-                    <div className="text-sm text-gray-300 truncate">
-                      {inv.clientName} {inv.clientEmail && <span className="text-gray-500">&bull; {inv.clientEmail}</span>}
-                    </div>
-                    <div className="font-mono text-lg mt-1 text-[#e6e9ef]">
-                      ${inv.total.toFixed(2)}
-                    </div>
+      <section>
+        <h2 className="text-lg font-semibold mb-4 text-[#4f8cff]">Invoices</h2>
+        {invoices.length === 0 ? (
+          <p className="text-gray-500 italic">No invoices yet. Create one above.</p>
+        ) : (
+          <div className="space-y-3">
+            {invoices.map((inv) => (
+              <div key={inv.id} className="bg-[#14171c] p-4 rounded-lg border border-gray-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="flex-1">
+                  <div className="flex items-center gap-3 mb-1">
+                    <span className="font-mono text-xs text-gray-500">{inv.id.slice(0, 8)}</span>
+                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                      inv.status === 'Paid' ? 'bg-green-900 text-green-300' :
+                      inv.status === 'Payment Link Ready' ? 'bg-blue-900 text-blue-300' :
+                      'bg-yellow-900 text-yellow-300'
+                    }`}>
+                      {inv.status}
+                    </span>
                   </div>
-
-                  <div className="flex gap-2 flex-wrap">
-                    <Link
-                      href={`/invoice/${inv.id}`}
-                      className="px-3 py-1.5 bg-gray-800 rounded text-xs hover:bg-gray-700 transition-colors"
-                    >
-                      Edit
-                    </Link>
-                    <button
-                      onClick={() => handleCopyLink(inv.id)}
-                      className="px-3 py-1.5 bg-gray-800 rounded text-xs hover:bg-gray-700 transition-colors"
-                    >
-                      Copy Link
-                    </button>
-                    <button
-                      onClick={() => handleEmail(inv)}
-                      className="px-3 py-1.5 bg-gray-800 rounded text-xs hover:bg-gray-700 transition-colors"
-                    >
-                      Email
-                    </button>
-                    {inv.status === 'Draft' && (
-                      <button
-                        onClick={() => handleGeneratePayment(inv)}
-                        className="px-3 py-1.5 bg-[#4f8cff] text-black rounded text-xs font-bold hover:bg-blue-400 transition-colors"
-                      >
-                        Pay Link
-                      </button>
-                    )}
-                    {inv.paymentLink && inv.status === 'Payment Link Ready' && (
-                      <button
-                        onClick={() => {
-                          navigator.clipboard.writeText(inv.paymentLink!);
-                          alert('Payment link copied!');
-                        }}
-                        className="px-3 py-1.5 bg-[#4f8cff] text-black rounded text-xs font-bold hover:bg-blue-400 transition-colors"
-                      >
-                        Copy Pay Link
-                      </button>
-                    )}
-                    <button
-                      onClick={() => handleDelete(inv.id)}
-                      className="px-3 py-1.5 bg-red-900/30 text-red-400 rounded text-xs hover:bg-red-900/50 transition-colors"
-                    >
-                      Delete
-                    </button>
+                  <h3 className="font-semibold text-base">{inv.clientName}</h3>
+                  <p className="text-sm text-gray-400">{inv.clientEmail}</p>
+                </div>
+                <div className="flex flex-col items-end gap-2">
+                  <span className="font-mono text-lg font-bold text-[#e6e9ef]">${inv.total.toFixed(2)}</span>
+                  <div className="flex gap-2">
+                    <button onClick={() => router.push(`/invoice/${inv.id}`)} className="text-xs bg-gray-800 hover:bg-gray-700 px-3 py-1 rounded transition-colors">Edit</button>
+                    <button onClick={() => copyLink(inv.id)} className="text-xs bg-gray-800 hover:bg-gray-700 px-3 py-1 rounded transition-colors">Copy Link</button>
+                    <button onClick={() => sendEmail(inv.id)} className="text-xs bg-gray-800 hover:bg-gray-700 px-3 py-1 rounded transition-colors">Email</button>
+                    <button onClick={() => handleDelete(inv.id)} className="text-xs bg-red-900/50 hover:bg-red-900 text-red-300 px-3 py-1 rounded transition-colors">Delete</button>
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
-        </section>
-      </main>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
     </div>
   );
 }

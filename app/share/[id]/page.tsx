@@ -1,14 +1,13 @@
-"use client";
+'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
-import Link from 'next/link';
 
 interface InvoiceItem {
   id: string;
   description: string;
   quantity: number;
-  unitPrice: number;
+  rate: number;
 }
 
 interface Invoice {
@@ -25,150 +24,102 @@ interface Invoice {
 
 const STORAGE_KEY = 'freelance_invoice_lite_data';
 
-export default function ShareInvoicePage() {
+export default function ShareInvoice() {
   const params = useParams();
   const id = params.id as string;
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (!stored) {
-      setError('No data found');
-      setLoading(false);
-      return;
-    }
-
-    try {
-      const invoices: Invoice[] = JSON.parse(stored);
-      const found = invoices.find((i) => i.id === id);
-
-      if (!found) {
-        setError('Invoice not found');
-      } else {
-        setInvoice(found);
+    if (stored) {
+      try {
+        const invoices: Invoice[] = JSON.parse(stored);
+        const found = invoices.find((inv) => inv.id === id);
+        if (found) {
+          setInvoice(found);
+        } else {
+          alert('Invoice not found.');
+        }
+      } catch (e) {
+        console.error('Failed to load shared invoice', e);
       }
-    } catch (e) {
-      setError('Failed to load invoice data');
-      console.error(e);
-    } finally {
-      setLoading(false);
     }
+    setLoading(false);
   }, [id]);
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-[#0b0d10] text-[#e6e9ef] flex items-center justify-center">
-        Loading invoice...
-      </div>
-    );
-  }
-
-  if (error || !invoice) {
-    return (
-      <div className="min-h-screen bg-[#0b0d10] text-[#e6e9ef] flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-red-400 mb-4">{error || 'Invoice not found'}</p>
-          <Link href="/" className="text-[#4f8cff] hover:underline">
-            Back to Home
-          </Link>
-        </div>
-      </div>
-    );
-  }
+  if (loading) return <div className="min-h-screen bg-[#0b0d10] text-[#e6e9ef] p-8">Loading...</div>;
+  if (!invoice) return <div className="min-h-screen bg-[#0b0d10] text-[#e6e9ef] p-8 flex items-center justify-center">Invoice not found.</div>;
 
   return (
-    <div className="min-h-screen bg-[#0b0d10] text-[#e6e9ef] font-sans p-4 md:p-8">
-      <div className="max-w-2xl mx-auto bg-[#14171c] p-6 md:p-10 rounded-lg border border-gray-800 shadow-2xl">
-        <div className="flex justify-between items-start mb-8">
-          <div>
-            <h1 className="text-3xl font-bold mb-2 tracking-tight">INVOICE</h1>
-            <div className="font-mono text-sm text-gray-400">#{invoice.id.slice(0, 8)}</div>
-          </div>
-          <div className="text-right">
-            <div
-              className={`text-lg font-bold ${
-                invoice.status === 'Paid'
-                  ? 'text-green-400'
-                  : invoice.status === 'Payment Link Ready'
-                  ? 'text-yellow-400'
-                  : 'text-gray-400'
-              }`}
-            >
+    <div className="min-h-screen bg-[#0b0d10] text-[#e6e9ef] p-4 md:p-8 font-sans">
+      <div className="max-w-2xl mx-auto bg-[#14171c] p-6 md:p-8 rounded-lg border border-gray-800 shadow-xl">
+        <header className="mb-8 pb-6 border-b border-gray-800">
+          <div className="flex justify-between items-start">
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight text-[#e6e9ef]">INVOICE</h1>
+              <p className="text-sm text-gray-500 font-mono mt-1">#{invoice.id.slice(0, 8)}</p>
+            </div>
+            <span className={`px-3 py-1 rounded text-sm font-medium ${
+              invoice.status === 'Paid' ? 'bg-green-900 text-green-300' :
+              invoice.status === 'Payment Link Ready' ? 'bg-blue-900 text-blue-300' :
+              'bg-yellow-900 text-yellow-300'
+            }`}>
               {invoice.status}
-            </div>
-            <div className="text-xs text-gray-500 mt-1">
-              {new Date(invoice.createdAt).toLocaleDateString()}
-            </div>
+            </span>
           </div>
-        </div>
+          <p className="text-sm text-gray-400 mt-2">Issued: {new Date(invoice.createdAt).toLocaleDateString()}</p>
+        </header>
 
-        <div className="mb-8 pb-6 border-b border-gray-800">
-          <h2 className="text-xs uppercase tracking-wide text-gray-500 mb-3">Bill To</h2>
-          <div className="text-lg font-semibold">{invoice.clientName}</div>
-          {invoice.clientEmail && (
-            <div className="text-gray-400 text-sm">{invoice.clientEmail}</div>
-          )}
-        </div>
+        <section className="mb-8">
+          <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2">Bill To</h2>
+          <p className="text-lg font-medium text-[#e6e9ef]">{invoice.clientName}</p>
+          <p className="text-gray-400">{invoice.clientEmail}</p>
+        </section>
 
-        <table className="w-full mb-8">
-          <thead>
-            <tr className="border-b border-gray-700 text-left text-xs uppercase tracking-wide text-gray-500">
-              <th className="pb-3 font-normal">Description</th>
-              <th className="pb-3 font-normal text-right">Qty</th>
-              <th className="pb-3 font-normal text-right">Price</th>
-              <th className="pb-3 font-normal text-right">Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {invoice.items.map((item) => (
-              <tr key={item.id} className="border-b border-gray-800/50">
-                <td className="py-3 text-sm">{item.description}</td>
-                <td className="py-3 text-right font-mono text-sm">{item.quantity}</td>
-                <td className="py-3 text-right font-mono text-sm">
-                  ${item.unitPrice.toFixed(2)}
-                </td>
-                <td className="py-3 text-right font-mono text-sm">
-                  ${(item.quantity * item.unitPrice).toFixed(2)}
-                </td>
+        <section className="mb-8">
+          <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">Line Items</h2>
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="border-b border-gray-800 text-sm text-gray-400">
+                <th className="pb-2 font-normal">Description</th>
+                <th className="pb-2 font-normal text-right">Qty</th>
+                <th className="pb-2 font-normal text-right">Rate</th>
+                <th className="pb-2 font-normal text-right">Amount</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {invoice.items.map((item) => (
+                <tr key={item.id} className="border-b border-gray-800/50">
+                  <td className="py-3 text-sm">{item.description || 'Untitled Item'}</td>
+                  <td className="py-3 text-sm font-mono text-right">{item.quantity}</td>
+                  <td className="py-3 text-sm font-mono text-right">${item.rate.toFixed(2)}</td>
+                  <td className="py-3 text-sm font-mono text-right">${(item.quantity * item.rate).toFixed(2)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
 
-        <div className="flex justify-end mb-8">
-          <div className="text-right">
-            <div className="text-xs text-gray-400 mb-1 uppercase tracking-wide">
-              Total Amount
-            </div>
-            <div className="text-3xl font-mono font-bold text-[#4f8cff]">
-              ${invoice.total.toFixed(2)}
-            </div>
+        <section className="pt-4 border-t border-gray-800">
+          <div className="flex justify-between items-center">
+            <span className="text-lg font-medium text-gray-400">Total Due</span>
+            <span className="text-2xl font-mono font-bold text-[#e6e9ef]">${invoice.total.toFixed(2)}</span>
           </div>
-        </div>
+        </section>
 
         {invoice.paymentLink && (
-          <div className="bg-[#0b0d10] p-6 rounded-lg border border-gray-700 text-center">
-            <p className="text-gray-400 mb-4 text-sm">
-              Pay securely via Stripe Checkout
-            </p>
-            <a
-              href={invoice.paymentLink}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-block bg-[#4f8cff] text-black font-bold py-3 px-8 rounded hover:bg-blue-400 transition-colors text-sm"
-            >
+          <section className="mt-8 pt-6 border-t border-gray-800">
+            <p className="text-sm text-gray-400 mb-2">Pay securely online:</p>
+            <a href={invoice.paymentLink} target="_blank" rel="noopener noreferrer" className="inline-block bg-[#4f8cff] hover:bg-[#3a7bd5] text-white font-medium py-2 px-6 rounded transition-colors">
               Pay Now
             </a>
-          </div>
+          </section>
         )}
-
-        <div className="mt-8 pt-6 border-t border-gray-800 text-center">
-          <div className="text-xs text-gray-600">
-            Generated by Freelance Invoice Lite
-          </div>
-        </div>
+        
+        <footer className="mt-12 pt-6 border-t border-gray-800 text-center text-xs text-gray-600">
+          Generated by Freelance Invoice Lite
+        </footer>
       </div>
     </div>
   );
